@@ -18,6 +18,9 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 client = OpenAI()
 client.api_key = OPENAI_API_KEY
 
+# Указываем нужный чат
+ALLOWED_CHAT_ID =  -1002370287106
+
 # Логирование в БД
 def log_interaction(user_id, username, request, response):
     conn = sqlite3.connect('bot_stats.db')
@@ -31,9 +34,14 @@ def log_interaction(user_id, username, request, response):
 
 # Команда /stats
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Ограничиваем сам чат
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        await update.message.reply_text("Этот бот работает только в определённой группе.")
+        return
+
     # Ограничиваем доступ к /stats только определённому user_id
     if update.effective_user.id != 270587758:  # Замените на свой ID
-        await update.message.reply_text("❌ Доступ запрещен")
+        await update.message.reply_text("❌ Доступ к команде /stats запрещен")
         return
 
     conn = sqlite3.connect('bot_stats.db')
@@ -44,7 +52,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_requests = c.fetchone()[0]
     
     # 2. Считаем, сколько запросов сделал каждый пользователь
-    #    (с группировкой по user_id, username)
     c.execute("""
         SELECT user_id, username, COUNT(*) as cnt
         FROM interactions
@@ -54,12 +61,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = c.fetchall()
     
     # Формируем текст статистики по пользователям
-    # Пример строки: "username (user_id): 10"
     user_lines = []
-    for user_id, username, cnt in rows:
-        # Если у кого-то нет username, подставим что-нибудь вроде "unknown"
-        display_name = username if username else "unknown"
-        user_lines.append(f"{display_name} ({user_id}): {cnt}")
+    for user_id_val, username_val, cnt in rows:
+        display_name = username_val if username_val else "unknown"
+        user_lines.append(f"{display_name} ({user_id_val}): {cnt}")
 
     user_stats_text = "\n".join(user_lines)
 
@@ -73,11 +78,15 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Отправляем сообщение
     await update.message.reply_text(stats_message)
-
     conn.close()
 
 # Команда /chinese
 async def chinese(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Ограничиваем сам чат
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        await update.message.reply_text("Этот бот работает только в определённой группе.")
+        return
+
     user_text = " ".join(context.args).strip()
     if not user_text:
         await update.message.reply_text("❌ Пример: /chinese Текст вашего вопроса")
@@ -85,32 +94,31 @@ async def chinese(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "Отвечай в стиле китайской мудрости"},
-                    {
-                        "role": "user",
-                        "content": user_text
-                    }
-    ]
-)
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Отвечай в стиле китайской мудрости"},
+                {"role": "user", "content": user_text}
+            ]
+        )
         gpt_response = response.choices[0].message.content
-        log_interaction(update.effective_user.id, update.effective_user.username, user_text, gpt_response)
+        log_interaction(
+            update.effective_user.id,
+            update.effective_user.username,
+            user_text,
+            gpt_response
+        )
         await update.message.reply_text(gpt_response)
     except Exception as e:
         await update.message.reply_text(f"⚠️ Ошибка: {str(e)}")
 
-# # Обработка обычных сообщений
-# async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     request = update.message.text
-#     response = f"Вы написали: {request}"
-#     log_interaction(update.effective_user.id, update.effective_user.username, request, response)
-#     await update.message.reply_text(response)
-        
+# Хендлер на слово "мнение"
 async def handle_opinion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text
+    # Ограничиваем сам чат
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        await update.message.reply_text("Этот бот работает только в определённой группе.")
+        return
     
-    # Пример (можно изменить под вашу задачу) — формируем запрос к GPT
+    user_text = update.message.text
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -126,22 +134,26 @@ async def handle_opinion(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         )
         gpt_response = response.choices[0].message.content
-
-        # Логируем в БД
-        log_interaction(update.effective_user.id, update.effective_user.username, user_text, gpt_response)
-
-        # Отправляем ответ пользователю
+        log_interaction(
+            update.effective_user.id,
+            update.effective_user.username,
+            user_text,
+            gpt_response
+        )
         await update.message.reply_text(gpt_response)
-
     except Exception as e:
         await update.message.reply_text(f"⚠️ Ошибка при получении мнения: {str(e)}")
 
 def main():
     app = Application.builder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("chinese", chinese))
+    
+    # При любом тексте, в котором встречается слово "мнение" (в любом регистре) — handle_opinion
     opinion_filter = filters.TEXT & filters.Regex(r'(?i)\bмнение\b')
     app.add_handler(MessageHandler(opinion_filter, handle_opinion))
+
     print("Бот запущен...")
     app.run_polling()
 
