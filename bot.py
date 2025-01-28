@@ -31,20 +31,49 @@ def log_interaction(user_id, username, request, response):
 
 # Команда /stats
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != 270587758:  # Замените на ваш user_id
+    # Ограничиваем доступ к /stats только определённому user_id
+    if update.effective_user.id != 270587758:  # Замените на свой ID
         await update.message.reply_text("❌ Доступ запрещен")
         return
 
     conn = sqlite3.connect('bot_stats.db')
     c = conn.cursor()
     
+    # 1. Считаем общее количество запросов (всех пользователей)
     c.execute("SELECT COUNT(*) FROM interactions")
-    total = c.fetchone()[0]
+    total_requests = c.fetchone()[0]
     
-    c.execute("SELECT request, COUNT(*) FROM interactions GROUP BY request ORDER BY 2 DESC LIMIT 5")
-    popular = "\n".join([f"{row[0]} ({row[1]})" for row in c.fetchall()])
+    # 2. Считаем, сколько запросов сделал каждый пользователь
+    #    (с группировкой по user_id, username)
+    c.execute("""
+        SELECT user_id, username, COUNT(*) as cnt
+        FROM interactions
+        GROUP BY user_id, username
+        ORDER BY cnt DESC
+    """)
+    rows = c.fetchall()
     
-    await update.message.reply_text(f"📊 Статистика:\n\n• Всего запросов: {total}\n• Топ-5:\n{popular}")
+    # Формируем текст статистики по пользователям
+    # Пример строки: "username (user_id): 10"
+    user_lines = []
+    for user_id, username, cnt in rows:
+        # Если у кого-то нет username, подставим что-нибудь вроде "unknown"
+        display_name = username if username else "unknown"
+        user_lines.append(f"{display_name} ({user_id}): {cnt}")
+
+    user_stats_text = "\n".join(user_lines)
+
+    # 3. Формируем финальный текст для ответа
+    stats_message = (
+        f"📊 Общая статистика:\n\n"
+        f"• Всего запросов: {total_requests}\n\n"
+        f"Статистика по каждому пользователю:\n"
+        f"{user_stats_text}"
+    )
+
+    # Отправляем сообщение
+    await update.message.reply_text(stats_message)
+
     conn.close()
 
 # Команда /chinese
