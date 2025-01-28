@@ -1,0 +1,55 @@
+name: Deploy Telegram Bot
+
+on:
+  push:
+    branches:
+      - main  # срабатывать при пуше в ветку main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Клонируем репозиторий
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      # 2. Устанавливаем Python (если захотим локальные тесты)
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
+
+      # 3. Устанавливаем зависимости (для тестов, линтеров, и т.д.)
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. (Опционально) Запускаем тесты
+      - name: Run tests
+        run: |
+          echo "No tests yet"
+          # Пример, если есть тесты:
+          # pytest
+
+      # 5. Деплой на сервер по SSH (git pull, обновление зависимостей, рестарт systemd)
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            # Переходим в директорию с проектом
+            cd /home/telegram-bot
+
+            # Делаем git pull (если репозиторий уже склонирован на сервере)
+            # Или, если не клонировали репозиторий на сервер, можно использовать scp-action (см. ниже)
+            git pull origin main
+
+            # Обновляем зависимости из venv
+            /home/telegram-bot/venv/bin/pip install -r requirements.txt
+
+            # Перезапускаем systemd-сервис
+            sudo systemctl restart bot.service
