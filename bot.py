@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import datetime
 from openai import OpenAI
 from dotenv import load_dotenv
 from telegram import Update
@@ -8,7 +9,8 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     filters,
-    ContextTypes
+    ContextTypes,
+    JobQueue
 )
 
 # Загрузка переменных окружения
@@ -144,15 +146,99 @@ async def handle_opinion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Ошибка при получении мнения: {str(e)}")
 
+
+# === 1. Функция, получающая "Game of Thrones" тайтлы для каждого участника ===
+async def generate_got_titles():
+    # 1. Собираем список участников из БД (по сути - все, кто когда-то писал боту)
+    conn = sqlite3.connect('bot_stats.db')
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT user_id, username FROM interactions")
+    users = c.fetchall()
+    conn.close()
+
+    # Если нет пользователей
+    if not users:
+        return "Пока нет ни одного участника, у кого есть записи в БД."
+
+    # Сформируем список имён, уберём пустые
+    # (вдруг кто-то писал без username, тогда подставим что-то вместо)
+    names = []
+    for user_id_val, username_val in users:
+        display_name = username_val if username_val else f"ID_{user_id_val}"
+        names.append(display_name)
+
+    # 2. Готовим системное сообщение для GPT: пусть сгенерирует уникальные титулы
+    # Лучше одним запросом, чтобы GPT сгенерировал список
+    try:
+        # Создаём текст для GPT
+        # Например, передадим список имён и попросим для каждого придумать тайтл:
+        prompt_for_gpt = (
+            "Представь, что все эти пользователи — герои Игры Престолов. "
+            "Придумай каждому эпичный уникальный титул в стиле сериала. "
+            "Формат вывода: «Имя: Титул».\n\n"
+            "Список участников:\n" + "\n".join(names)
+        )
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты — настоящий мейстер из Вестероса, придумываешь эпичные титулы в стиле 'Игры престолов'."
+                },
+                {
+                    "role": "user",
+                    "content": prompt_for_gpt
+                }
+            ]
+        )
+        gpt_response = response.choices[0].message.content
+        return gpt_response
+
+    except Exception as e:
+        return f"Ошибка при генерации титулов: {str(e)}"
+
+# === 2. Команда /got — чтобы можно было вручную получить титулы ===
+async def got_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Ограничиваем чат
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
+        await update.message.reply_text("Эта команда доступна только в одной группе.")
+        return
+
+    # Запрашиваем тайтлы и отправляем
+    titles_text = await generate_got_titles()
+    await update.message.reply_text(titles_text)
+
+# === 3. Периодическая задача (каждый четверг в 19:00) ===
+#    Обратите внимание: дни недели в run_daily считаются с 0 (понедельник) по 6 (воскресенье).
+#    Четверг = 3.
+async def send_weekly_got_titles(context: ContextTypes.DEFAULT_TYPE):
+    # Генерируем тайтлы
+    titles_text = await generate_got_titles()
+    # Отправляем в нужный чат
+    await context.bot.send_message(chat_id=ALLOWED_CHAT_ID, text=titles_text)
+
 def main():
     app = Application.builder().token(TOKEN).build()
 
+    # Добавляем хендлеры
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("chinese", chinese))
-    
-    # При любом тексте, в котором встречается слово "мнение" (в любом регистре) — handle_opinion
+    # Команда /got для ручного запроса
+    app.add_handler(CommandHandler("got", got_command))
+
+    # При любом тексте, в котором встречается слово "мнение" (в любом регистре)
     opinion_filter = filters.TEXT & filters.Regex(r'(?i)\bмнение\b')
     app.add_handler(MessageHandler(opinion_filter, handle_opinion))
+
+    # Настраиваем JobQueue для еженедельной отправки
+    # Часовой пояс берётся тот, который на сервере (или можно задать tzinfo).
+    job_queue = app.job_queue
+    job_queue.run_daily(
+        send_weekly_got_titles,
+        time=datetime.time(hour=19, minute=0),
+        days=(3,)  # 0=Пн, 1=Вт, 2=Ср, 3=Чт, 4=Пт, 5=Сб, 6=Вс
+    )
 
     print("Бот запущен...")
     app.run_polling()
