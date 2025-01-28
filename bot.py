@@ -106,11 +106,42 @@ async def chinese(update: Update, context: ContextTypes.DEFAULT_TYPE):
 #     response = f"Вы написали: {request}"
 #     log_interaction(update.effective_user.id, update.effective_user.username, request, response)
 #     await update.message.reply_text(response)
+        
+async def handle_opinion(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text
+    
+    # Пример (можно изменить под вашу задачу) — формируем запрос к GPT
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Поделись своим мнением и проанализируй следующий текст"
+                },
+                {
+                    "role": "user",
+                    "content": user_text
+                }
+            ]
+        )
+        gpt_response = response.choices[0].message.content
+
+        # Логируем в БД
+        log_interaction(update.effective_user.id, update.effective_user.username, user_text, gpt_response)
+
+        # Отправляем ответ пользователю
+        await update.message.reply_text(gpt_response)
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Ошибка при получении мнения: {str(e)}")
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("chinese", chinese))
+    opinion_filter = filters.TEXT & filters.Regex(r'(?i)\bмнение\b')
+    app.add_handler(MessageHandler(opinion_filter, handle_opinion))
     print("Бот запущен...")
     app.run_polling()
 
