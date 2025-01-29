@@ -122,12 +122,17 @@ async def handle_opinion(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_text = update.message.text
     try:
+        content_for_opinion = """
+            Представь, что ты очень плохой шутник и попытаешься сделать очень плохую и 
+            глупую шутку над моим следующим текстом. Пусть шутки будут очень очень обидными, 
+            добавь еще в конце одно из трех: "Какая жалость", "Лох", "Спасибо что позвали" стараясь подобрать по смыслу к шутке
+        """
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": "Поделись своим мнением и проанализируй следующий текст"
+                    "content": content_for_opinion
                 },
                 {
                     "role": "user",
