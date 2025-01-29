@@ -48,8 +48,8 @@ jobs:
             # Или, если не клонировали репозиторий на сервер, можно использовать scp-action (см. ниже)
             git pull origin main
 
-            # Обновляем зависимости из venv
-            /home/telegram-bot/venv/bin/pip install -r requirements.txt
+            # Пересобираем контейнер докера
+            docker build -t my-python-app .
 
-            # Перезапускаем systemd-сервис
-            sudo systemctl restart bot.service
+            # Перезаупскаем контейнер докера
+            docker run -d -p 8081:8081 my-python-app
